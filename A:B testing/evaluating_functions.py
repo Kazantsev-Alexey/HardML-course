@@ -273,3 +273,23 @@ def select_stratified_groups(data, strat_columns, group_size, weights=None, seed
     data_pilot = pd.concat(pilot_dfs)
     data_control = pd.concat(control_dfs)
     return (data_pilot, data_control)
+
+def get_minimal_determinable_effect(std, sample_size, alpha=0.05, beta=0.2):
+    '''Вычисление критических значений Z-оценок:
+       t_alpha и t_beta - это критические значения Z-оценок для уровня значимости alpha/2 
+       и мощности теста 1-beta соответственно.
+       Они используются для определения границ доверительного интервала и мощности теста соответственно.
+       Вычисление корня из суммы дисперсий:
+            disp_sum_sqrt представляет собой квадратный корень из суммы дисперсий.
+            Дисперсия умножается на 2, потому что рассматриваются две группы данных.
+       Вычисление минимально обнаружимого эффекта (MDE):
+            MDE вычисляется как произведение критических значений Z-оценок
+            и корня из суммы дисперсий, деленное на квадратный корень из размера выборки.
+       Это позволяет определить, какой размер эффекта можно обнаружить при заданных условиях эксперимента
+       (уровень значимости, мощность) и размере выборки.
+       Возвращается вычисленное значение MDE.'''
+    t_alpha = norm.ppf(1 - alpha / 2, loc=0, scale=1)
+    t_beta = norm.ppf(1 - beta, loc=0, scale=1)
+    disp_sum_sqrt = (2 * (std ** 2)) ** 0.5
+    mde = (t_alpha + t_beta) * disp_sum_sqrt / np.sqrt(sample_size)
+    return mde
