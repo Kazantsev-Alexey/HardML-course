@@ -5,15 +5,20 @@ from scipy.stats import ttest_ind
 
 def get_sample_size(mu, std, eff=1.01, alpha=0.05, beta=0.2):
     
-    '''stats.norm.ppf возвращает обратное значение функции нормального распределения
+    '''Первым шагом вычисляются критические значения Z-оценки для уровня значимости alpha/2 и мощности теста (1-beta).
+        Это делается с помощью функции stats.norm.ppf() из библиотеки SciPy, 
+        которая вычисляет квантили нормального распределения.
+       stats.norm.ppf возвращает обратное значение функции нормального распределения
        (т.е., значение, соответствующее заданной вероятности) 
-       для указанного значения квантиля q,
-       с заданным средним значением loc 
-       и стандартным отклонением scale
-       
+       для указанного значения квантиля q,с заданным средним значением loc и стандартным отклонением scale.
        Для стандартного нормального распределения, симметричного относительно нуля,
        stats.norm.ppf(alpha / 2) и stats.norm.ppf(1 - alpha / 2) будут возвращать противоположные по знаку значения,
        но с одинаковой абсолютной величиной.
+       Затем вычисляется квадрат разницы между средними значениями (mu и mu * eff) и умножается на себя.
+       Это представляет собой ожидаемое изменение среднего, умноженное на его ожидаемое отклонение.
+       Затем сумма квадратов критических значений Z-оценок находится и умножается на двойное значение дисперсии. 
+       Это представляет собой сумму дисперсий двух групп, которые мы хотим сравнить.
+       Наконец, вычисляется необходимый размер выборки как результат деления суммы Z-оценок на квадрат разницы средних значений
        '''
     t_alpha = abs(stats.norm.ppf(1 - alpha / 2, loc=0, scale=1))
     t_beta = stats.norm.ppf(1 - beta, loc=0, scale=1)
@@ -206,3 +211,65 @@ def get_bernoulli_confidence_interval(values: np.array):
     right_bound = p + z * std
     ci = np.clip((left_bound, right_bound),0,1)
     return ci
+
+def calc_integral(coordinates, values):
+    '''Функция принимает два аргумента: coordinates и values,
+    предполагая, что coordinates содержит координаты точек,
+    а values содержит значения функции в этих точках.
+    Внутри функции создается переменная integral, которая инициализируется значением 0. 
+    Эта переменная будет использоваться для накопления результата интегрирования.
+    Затем происходит итерация по координатам (за исключением последней координаты) с помощью цикла for. 
+    Внутри цикла вычисляется разница между следующей и текущей координатами (delta_x), 
+    что представляет собой ширину трапеции в текущем сегменте.
+    Далее происходит вычисление площади трапеции для текущего сегмента: 
+    ширина трапеции (delta_x) умножается на среднее значение функции в текущем и следующем узле
+    ((values[i] + values[i + 1]) / 2), и это значение добавляется к integral.
+    После завершения цикла возвращается integral, 
+    который представляет собой приближенное значение определенного интеграла функции.'''
+    integral = 0
+    for i in range(len(coordinates) - 1):
+        delta_x = coordinates[i + 1] - coordinates[i]
+        integral += delta_x * (values[i] + values[i + 1]) / 2
+    return integral
+    
+    
+def select_stratified_groups(data, strat_columns, group_size, weights=None, seed=None):
+    """Подбирает стратифицированные группы для эксперимента.
+
+    data - pd.DataFrame, датафрейм с описанием объектов, содержит атрибуты для стратификации.
+    strat_columns - List[str], список названий столбцов, по которым нужно стратифицировать.
+    group_size - int, размеры групп.
+    weights - dict, словарь весов страт {strat: weight}, где strat - tuple значений элементов страт,
+        например, для strat_columns=['os', 'gender', 'birth_year'] будет ('ios', 'man', 1992).
+        Если None, определить веса пропорционально доле страт в датафрейме data.
+    seed - int, исходное состояние генератора случайных чисел для воспроизводимости
+        результатов. Если None, то состояние генератора не устанавливается.
+
+    return (data_pilot, data_control) - два датафрейма того же формата что и data
+        c пилотной и контрольной группами.
+    """
+    if seed:
+        np.random.seed(seed)
+
+    if weights is None:
+        len_data = len(data)
+        weights = {strat: len(df_) / len_data for strat, df_ in data.groupby(strat_columns)}
+
+    # кол-во элементов страты в группе
+    strat_count_in_group = {strat: int(round(group_size * weight)) for strat, weight in weights.items()}
+
+    pilot_dfs = []
+    control_dfs = []
+    for strat, data_strat in data.groupby(strat_columns):
+        if strat in strat_count_in_group:
+            count_in_group = strat_count_in_group[strat]
+            index_data_groups = np.random.choice(
+                np.arange(len(data_strat)),
+                count_in_group * 2,
+                False
+            )
+            pilot_dfs.append(data_strat.iloc[index_data_groups[:count_in_group]])
+            control_dfs.append(data_strat.iloc[index_data_groups[count_in_group:]])
+    data_pilot = pd.concat(pilot_dfs)
+    data_control = pd.concat(control_dfs)
+    return (data_pilot, data_control)
